@@ -28,6 +28,8 @@ const EDIT: &str = "Write the release from the group findings, human edits and s
     the supplied documentation URLs.";
 const MAX_BYTES: usize = 100_000;
 const ROUNDS: usize = 6;
+const QUERIES_PER_ROUND: usize = 8;
+const FINISH: &str = "Repository lookup is complete. Return the group's release-note finding using the evidence already collected. Mark unsupported decisions unresolved and include specific reviewer questions.";
 
 fn object(properties: Value) -> Value {
     let required = properties.as_object().unwrap().keys().collect::<Vec<_>>();
@@ -42,7 +44,9 @@ fn investigation_schema() -> Value {
         "kind":{"type":"string","enum":["read","search","patch"]},
         "revision":string,"value":string,"start":{"type":"integer"}
     }));
-    object(json!({"queries":array(query),"finding":{"anyOf":[openai::schema(),{"type":"null"}]}}))
+    object(
+        json!({"queries":{"type":"array","items":query,"maxItems":QUERIES_PER_ROUND},"finding":{"anyOf":[openai::schema(),{"type":"null"}]}}),
+    )
 }
 fn digest(value: &impl Serialize) -> Result<String> {
     identity(&serde_json::to_vec(value)?)
@@ -380,36 +384,65 @@ impl<'a, F: FnMut(&Value) -> Result<Value>> Run<'a, F> {
         }
         let mut history = Vec::new();
         let mut dependencies = Vec::new();
+        let mut context_limited = false;
+        let finish_instructions = format!("{instructions}\n{FINISH}");
         for round in 0..ROUNDS {
-            let input = json!({"group":seed,"context":history,"rounds_remaining":ROUNDS-round-1});
-            let answer: Answer = serde_json::from_value(self.ask(
-                "investigate",
-                &instructions,
-                &input,
-                schema.clone(),
-            )?)?;
-            if answer.queries.is_empty() {
-                let finding = answer.finding.context("missing group finding")?;
-                crate::validate(&evidence, &finding)?;
-                let record = Investigation {
-                    finding,
-                    dependencies,
-                };
-                save(&file, &record)?;
-                return Ok(record.finding);
-            }
-            ensure!(
-                round + 1 < ROUNDS && answer.queries.len() <= 8,
-                "investigation exceeded query budget"
-            );
-            for query in answer.queries {
-                let value = self.reply(&query, &members);
-                dependencies.push(Dependency {
-                    digest: digest(&value)?,
-                    query: query.clone(),
-                });
-                history.push(json!({"query":query,"result":value}));
-            }
+            let remaining = ROUNDS - round - 1;
+            let input = json!({"group":seed,"context":history,"rounds_remaining":remaining,"context_limited":context_limited});
+            let finding = if remaining == 0 || context_limited {
+                let value = self
+                    .ask(
+                        "finish_investigation",
+                        &finish_instructions,
+                        &input,
+                        openai::schema(),
+                    )
+                    .with_context(|| format!("finalizing {}", ids.join(", ")))?;
+                serde_json::from_value(value)?
+            } else {
+                let value = self
+                    .ask("investigate", &instructions, &input, schema.clone())
+                    .with_context(|| {
+                        format!("investigating {} (round {})", ids.join(", "), round + 1)
+                    })?;
+                let answer: Answer = serde_json::from_value(value)?;
+                if !answer.queries.is_empty() {
+                    ensure!(
+                        answer.queries.len() <= QUERIES_PER_ROUND,
+                        "provider exceeded the query schema limit for {}",
+                        ids.join(", ")
+                    );
+                    // Each entry is JSON inside the API's input string. Reserve space for
+                    // finalization instructions and keep the existing wire-size guard.
+                    let mut bytes = self.calls.last().unwrap()["request_bytes"]
+                        .as_u64()
+                        .unwrap() as usize;
+                    for query in answer.queries {
+                        let value = self.reply(&query, &members);
+                        let entry = json!({"query":query,"result":value});
+                        bytes += serde_json::to_vec(&serde_json::to_string(&entry)?)?.len() + 1;
+                        if bytes + 512 > MAX_BYTES {
+                            context_limited = true;
+                            break;
+                        }
+                        dependencies.push(Dependency {
+                            digest: digest(&value)?,
+                            query,
+                        });
+                        history.push(entry);
+                    }
+                    continue;
+                }
+                answer.finding.context("missing group finding")?
+            };
+            crate::validate(&evidence, &finding)
+                .with_context(|| format!("validating {}", ids.join(", ")))?;
+            let record = Investigation {
+                finding,
+                dependencies,
+            };
+            save(&file, &record)?;
+            return Ok(record.finding);
         }
         unreachable!()
     }

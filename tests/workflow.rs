@@ -575,3 +575,50 @@ fn grouped_run_rechecks_code_context_when_head_moves() {
     );
     assert_eq!(run(&changed).1, 1);
 }
+
+#[test]
+fn investigation_finishes_with_findings_at_round_limit() {
+    use serde_json::{Value, json};
+    let repo = init();
+    let cache = tempfile::tempdir().unwrap();
+    let base = commit(repo.path(), "code", "old", "base");
+    let head = commit(repo.path(), "code", "new", "change");
+    let mut request = request();
+    request.evidence = collect_inventory(
+        repo.path(),
+        &base,
+        &head,
+        "owner/project",
+        &[],
+        GithubContext::default(),
+    )
+    .unwrap();
+    let finding = json!({"overview":"Reviewed.","bullets":[],"questions":["Was the old behavior released?"],"coverage":[{"source":head,"disposition":"unresolved","reason":"Insufficient evidence","bullets":[]}]});
+    let mut calls = Vec::new();
+    let mut run=grouped::Run::new(repo.path(),&request,&[],cache.path(),|body|{
+        let stage=body["text"]["format"]["name"].as_str().unwrap();
+        calls.push(stage.to_owned());
+        let schema=&body["text"]["format"]["schema"]["properties"];
+        let reply=match stage {
+            "group"=>json!({"groups":[[head]]}),
+            "investigate"=>{
+                assert_eq!(schema["queries"]["maxItems"],8);
+                json!({"queries":[{"kind":"read","revision":"base","value":"code","start":1}],"finding":null})
+            }
+            "finish_investigation"=>{
+                assert!(schema.get("queries").is_none());
+                let input:Value=serde_json::from_str(body["input"].as_str().unwrap())?;
+                assert_eq!(input["context"].as_array().unwrap().len(),5);
+                finding.clone()
+            }
+            "edit"=>finding.clone(),
+            _=>panic!("unexpected stage"),
+        };
+        Ok(json!({"status":"completed","output":[{"content":[{"type":"output_text","text":reply.to_string()}]}]}))
+    }).unwrap();
+    assert_eq!(
+        run.generate().unwrap().coverage[0].disposition,
+        "unresolved"
+    );
+    assert_eq!(calls.len(), 8);
+}
