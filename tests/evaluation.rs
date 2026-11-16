@@ -367,7 +367,6 @@ fn manual_body_edits_survive_generation_and_the_next_run_reuses_the_proposal() {
     .unwrap();
 }
 
-
 #[test]
 fn configured_budget_is_enforced_before_paid_calls_or_remote_writes() {
     let (repo, api, mut config) = fixture();

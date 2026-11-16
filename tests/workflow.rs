@@ -457,7 +457,6 @@ fn unrelated_pr_context_and_future_comments_do_not_enter_historical_packet() {
     assert!(!text.contains("UNRELATED ANSWER"));
 }
 
-
 #[test]
 fn explicit_budget_accepts_large_complete_inputs_and_reports_growth() {
     let directory = tempfile::tempdir().unwrap();
@@ -478,5 +477,8 @@ fn explicit_budget_accepts_large_complete_inputs_and_reports_growth() {
     assert_eq!(saved.evidence.commits[0].patch, patch);
     let bytes = fs::metadata(output.join("prompt.txt")).unwrap().len();
     assert!(bytes > DEFAULT_MAX_INPUT_BYTES as u64);
-    assert_eq!(input_breakdown(&request).unwrap()["commit_patches"], patch.len());
+    assert_eq!(
+        input_breakdown(&request).unwrap()["commit_patches"],
+        patch.len()
+    );
 }
