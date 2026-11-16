@@ -111,34 +111,14 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: tmandry/release-scribe
-          ref: main # Replace with a reviewed full commit SHA before enabling writes.
-          path: .scribe-tool
-          token: ${{ secrets.RELEASE_SCRIBE_READ_TOKEN || github.token }}
-          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Identify the build
-        id: build
-        run: |
-          echo "revision=$(git -C .scribe-tool rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "compiler=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Restore the executable
-        id: cache
-        uses: actions/cache/restore@v5
+      - name: Install and cache release-scribe
+        uses: baptiste0928/cargo-install@v3
         with:
-          path: .scribe-tool/target/release/release-scribe
-          key: release-scribe-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.compiler }}-${{ steps.build.outputs.revision }}
-      - name: Build on a cache miss
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: cargo build --release --locked --manifest-path .scribe-tool/Cargo.toml
-      - name: Save before generation
-        if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .scribe-tool/target/release/release-scribe
-          key: ${{ steps.cache.outputs.cache-primary-key }}
+          crate: release-scribe
+          git: https://github.com/tmandry/release-scribe
+          commit: efd6db1066073e76b884db76573706966d9019c7 # Pin a reviewed commit.
+          locked: true
       - name: Prepare or apply the preview
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,16 +128,15 @@ jobs:
           set -euo pipefail
           args=()
           if [ "$APPLY" = true ]; then args+=(--apply); fi
-          .scribe-tool/target/release/release-scribe evaluate \
+          release-scribe evaluate \
             --repo "$GITHUB_WORKSPACE" \
             --config .github/release-scribe.json \
             --output "$RUNNER_TEMP/release-scribe" "${args[@]}"
 ```
 
-Add `OPENAI_API_KEY` as an Actions secret. While the tool repository is private,
-also provide `RELEASE_SCRIBE_READ_TOKEN` with read access to it; public checkout
-uses the default token. Allow Actions to create pull requests in the consuming
-repository's workflow settings.
+Add `OPENAI_API_KEY` as an Actions secret and allow Actions to create pull requests
+in the consuming repository's workflow settings. The install action builds from
+the pinned Git commit and caches the executable for later runs.
 
 The repository needs a published stable release and its tag. An unchecked
 **apply** collects evidence without a model call or GitHub writes. Checking it

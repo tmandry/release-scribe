@@ -27,9 +27,8 @@ evaluation branch. Run from a trusted `workflow_dispatch` workflow during
 evaluation. Do not run with credentials on untrusted PR events.
 
 Set `OPENAI_API_KEY` as an Actions secret. `GH_TOKEN` needs same-repository
-contents, pull-request, and commit-status write access. A token checking out a
-private tool repository also needs read access there. Disable persisted checkout
-credentials. Pin the tool checkout to the reviewed commit SHA. Serialize runs
+contents, pull-request, and commit-status write access. Disable persisted checkout
+credentials. Pin the tool installation to the reviewed commit SHA. Serialize runs
 with one concurrency group and `cancel-in-progress: false`.
 
 ## Caching and recovery
@@ -39,7 +38,7 @@ evidence, documentation catalog, and human edits and feedback. Generated notes
 and run timestamps are not self-fed into the next request. Identical inputs reuse
 a validated response on a fresh runner. The state branch holds responses and
 usage; Actions artifacts/cache are optional diagnostics, not the durable record.
-Treat the state branch as project-private source data.
+Give the state branch the same access controls as the consuming project's source.
 
 The provider makes one bounded call on a miss, with no automatic retry or fallback.
 It validates the result, persists it on the remote state branch, and only then
