@@ -1,0 +1,16 @@
+[package]
+name = "release-scribe"
+version = "0.1.0"
+edition = "2024"
+description = "Deterministic evidence and validation for model-assisted release notes"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tmandry/release-scribe"
+include = ["src/**", "tests/**", "templates/**", "prompt.md", "Cargo.toml", "Cargo.lock", "README.md", "docs/**", "LICENSE-MIT", "LICENSE-APACHE"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+base64 = "0.21"
