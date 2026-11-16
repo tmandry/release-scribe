@@ -26,7 +26,14 @@ locally and remotely. Guidelines come from the pinned source commit, not an
 evaluation branch. Run from a trusted `workflow_dispatch` workflow during
 evaluation. Do not run with credentials on untrusted PR events.
 
-Set `OPENAI_API_KEY` as an Actions secret. `GH_TOKEN` needs same-repository
+Create a `release-notes` environment restricted to the `main` branch, with no
+allowed tags. Store `OPENAI_API_KEY` there as an environment secret and set
+`environment: release-notes` on the evaluation job. Remove any repository-level
+copy of this secret. An environment reference alone does not restrict refs;
+configure its branch policy in repository settings. Other trusted workflows on
+the allowed branch can also request this environment.
+
+`GH_TOKEN` needs same-repository
 contents, pull-request, and commit-status write access. Disable persisted checkout
 credentials. Pin the tool installation to the reviewed commit SHA. Serialize runs
 with one concurrency group and `cancel-in-progress: false`.

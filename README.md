@@ -103,6 +103,7 @@ concurrency:
 jobs:
   preview:
     if: github.ref == 'refs/heads/main'
+    environment: release-notes
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -134,9 +135,17 @@ jobs:
             --output "$RUNNER_TEMP/release-scribe" "${args[@]}"
 ```
 
-Add `OPENAI_API_KEY` as an Actions secret and allow Actions to create pull requests
-in the consuming repository's workflow settings. The install action builds from
-the pinned Git commit and caches the executable for later runs.
+Create a `release-notes` environment in the consuming repository's Settings →
+Environments. Restrict it to the `main` branch, with no allowed tags, and add
+`OPENAI_API_KEY` as an **environment secret**. If a repository-level copy of the
+key already exists, remove that copy after adding the environment secret. The
+workflow's `if` condition is an extra guard; the environment's branch policy
+enforces which refs can access the key. Other trusted workflows on `main` could
+also request this environment.
+
+Allow Actions to create pull requests in the repository's workflow settings.
+The install action builds from the pinned Git commit and caches the executable
+for later runs.
 
 The repository needs a published stable release and its tag. An unchecked
 **apply** collects evidence without a model call or GitHub writes. Checking it
