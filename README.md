@@ -1,14 +1,12 @@
 # release-scribe
 
-A Rust tool for model-assisted release notes: deterministic Git evidence,
-structured OpenAI generation, validated source coverage, immutable caching,
-and an isolated draft PR for evaluation.
+`release-scribe` generates LLM-assisted release notes from your Git history and GitHub pull requests. It collects your commits and diffs, drafts notes using your project's style guide, checks that every commit is accounted for, and caches outputs across runs. You can also use it to open an isolated draft PR so you can review the notes before publishing.
 
-Requires Git and Rust to build; the compiled tool uses `curl` for HTTPS and `gh`
-for GitHub. There is no Python or Node runtime. Project guidelines and configuration
-belong in the consuming repository. This repository contains no project evaluations.
+You'll need Git and the GitHub CLI (`gh`) installed. Keep your project's guidelines and configuration in the repository you're generating notes for.
 
 ## Local use
+
+Build the CLI and run the pipeline step by step:
 
 ```sh
 cargo build --locked
@@ -16,54 +14,41 @@ target/debug/release-scribe collect --repo /path/to/project --github-repo owner/
   --base v1.0.0 --target SOURCE_SHA --guidelines guidelines.md \
   --model gpt-6.1-sol --omit CHANGELOG.md --output run/input
 
-# Optional: fetch paginated PR descriptions, comments, and reviews, then collect
-# a final request using --github-context run/github.json.
+# Optional: pull in PR descriptions, comments, and reviews, then bundle a final
+# request using --github-context run/github.json.
 target/debug/release-scribe github --request run/input/request.json --output run/github.json
 
-# Read OPENAI_API_KEY from the environment. One call on a cache miss; no retries.
+# Reads OPENAI_API_KEY from your environment. Makes one call on a cache miss.
 target/debug/release-scribe generate --request run/input/request.json \
   --cache run/cache --output run/notes
+
 ```
 
-`accept` validates externally generated JSON; `restore` renders an exact cache
-hit with no provider call. `fingerprint` prints a request's content key. See
-`--help` for all options and `prompt.md` for the response contract.
+There are also a few helper subcommands: `accept` validates JSON generated outside the tool, `restore` renders a cached run without calling a model, and `fingerprint` prints a request's cache key. Check `--help` for all flags and `prompt.md` for the expected response format.
 
-Collection pins Git refs, checks ancestry, inventories merge and direct commits,
-and supplies per-commit patches and a net diff. Context files are read from both
-endpoints. Omissions remove file contents while keeping coverage identities;
-they do not redact secrets from commit messages or PR bodies. Input limits fail
-instead of truncating. Standard GitHub merge messages provide PR association;
-squash/rebase association is not implemented. Missing context is explicit.
+**How it works under the hood:**
 
-Validation requires every source commit exactly once, known IDs, consistent
-bullet/coverage references, and questions for unresolved coverage. Documentation
-links must exactly match the supplied catalog. These checks establish coverage
-and references; factual correctness and editorial quality still need review.
+* **Collection:** Gathers commits, patches, and the net diff between your base and target refs. You can omit noisy files from the payload, though commit messages and PR descriptions are still sent as-is.
+* **Validation:** Checks that every commit is covered once, all references match up, and any documentation links exist in your supplied catalog. This keeps the output grounded in your actual changes, though you'll still want to read through the final notes for accuracy and tone.
 
 ## Isolated PR evaluation
 
+The `evaluate` command lets you test release notes on isolated branches without touching your normal release workflow:
+
 ```sh
-# Free preparation: collect a request without generation or GitHub mutations.
+# Dry run: collect the request payload without calling a model or touching GitHub.
 target/debug/release-scribe evaluate --repo /path/to/project --config config.json --output run
 
-# Allow one model call on a miss and writes to the reserved evaluation branches.
+# Full run: call the model on a cache miss and update the isolated draft PR.
 target/debug/release-scribe evaluate --repo /path/to/project --config config.json --output applied --apply
+
 ```
 
-The consumer selects the model. Sol requests use the Responses API with strict
-JSON output, high reasoning effort, a 24,000 output token limit, and storage
-disabled. Keys are passed through transport stdin and never saved in requests,
-caches, diagnostics, or command arguments. Requests send selected source and
-discussion to OpenAI; model output is never executed.
-
-See [integration](docs/integration.md) for configuration, permissions, durable
-caching, human edits, and rollout boundaries.
+See [integration](https://www.google.com/search?q=docs/integration.md) for details on configuration, permissions, caching, and rollout setup.
 
 ## GitHub Actions example
 
-In the consuming repository, commit your editorial guidelines to
-`docs/release-notes.md` and add `.github/release-scribe.json`:
+To run previews in CI, commit your style guidelines to `docs/release-notes.md` and add `.github/release-scribe.json` to your repository:
 
 ```json
 {
@@ -73,13 +58,12 @@ In the consuming repository, commit your editorial guidelines to
   "model": "gpt-6.1-sol",
   "omit": ["CHANGELOG.md", ".release-scribe"]
 }
+
 ```
 
-Replace `owner/project` with your repository. Add context files and verified
-documentation links as described in [integration](docs/integration.md) so the
-model can check adoption instructions against the source.
+Replace `owner/project` with your repository. See [integration](https://www.google.com/search?q=docs/integration.md) if you want to include extra context files or verified documentation links.
 
-Save this as `.github/workflows/release-notes.yml` on your default branch:
+Next, save this workflow as `.github/workflows/release-notes.yml` on your default branch:
 
 ```yaml
 name: Release notes preview
@@ -133,43 +117,28 @@ jobs:
             --repo "$GITHUB_WORKSPACE" \
             --config .github/release-scribe.json \
             --output "$RUNNER_TEMP/release-scribe" "${args[@]}"
+
 ```
 
-Create a `release-notes` environment in the consuming repository's Settings →
-Environments. Restrict it to the `main` branch, with no allowed tags, and add
-`OPENAI_API_KEY` as an **environment secret**. If a repository-level copy of the
-key already exists, remove that copy after adding the environment secret. The
-workflow's `if` condition is an extra guard; the environment's branch policy
-enforces which refs can access the key. Other trusted workflows on `main` could
-also request this environment.
+Before running the workflow, configure two repository settings:
 
-Allow Actions to create pull requests in the repository's workflow settings.
-The install action builds from the pinned Git commit and caches the executable
-for later runs.
+1. Go to **Settings → Environments**, create a `release-notes` environment restricted to the `main` branch, and add `OPENAI_API_KEY` as an environment secret. Remove any repo-wide copy of the key so it isn't exposed to other workflows.
+2. In your repository's Actions settings, allow GitHub Actions to create pull requests.
 
-The repository needs a published stable release and its tag. An unchecked
-**apply** collects evidence without a model call or GitHub writes. Checking it
-allows one model call on a cache miss and updates the isolated draft PR. Review
-that PR without merging it while evaluating the flow. The executable cache above
-is separate from validated notes stored on the dedicated state branch. The
-existing release pipeline continues to run independently.
+Your repository also needs at least one published release tag to diff against. When you trigger the workflow from the Actions tab, leaving **apply** unchecked runs a dry run without calling a model or writing to GitHub. Checking **apply** generates the notes and updates the isolated draft PR for review (leave it unmerged while testing). Your existing release pipeline continues to run independently.
 
-## Development and publication
+## Development
 
 ```sh
 cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 cargo package --list --allow-dirty
+
 ```
 
-Tests use temporary Git repositories, a fixture GitHub service, structured
-responses, and a fake HTTPS transport. They make no paid calls. CI runs on Linux
-and macOS. The crate has an explicit package allowlist.
-
-Project-specific guidelines, configuration, and evaluation results belong in the
-consuming project rather than this repository or its crate package.
+Tests use local Git fixtures and mock transports, so running the suite makes no live API calls.
 
 ## License
 
-Licensed under either [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
+Licensed under either [Apache 2.0](https://www.google.com/search?q=LICENSE-APACHE) or [MIT](https://www.google.com/search?q=LICENSE-MIT), at your option.
