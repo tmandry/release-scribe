@@ -90,3 +90,31 @@ Dry runs report the input bytes, configured limit, commit count, and raw section
 sizes. Oversize failures identify section sizes without logging source contents.
 The tool never truncates evidence or invokes a model when the ceiling is exceeded.
 Changing the ceiling alone does not change model inputs or invalidate cached notes.
+
+### Read-only grouped evaluation
+
+Run from a checkout with full history. All ranges use the guidelines from that
+checkout, so a historical comparison can hold editorial policy constant.
+
+```sh
+release-scribe grouped --repo . --config .github/release-scribe/config.json \
+  --base v1.0 --target HEAD --output runs/inventory --cache runs/groups
+```
+
+The default writes a PR and direct-commit inventory locally. Add `--generate`
+and select a fresh output directory to call the configured OpenAI model. Use
+`--github-context` for an offline GitHub snapshot and `--prior-state` for
+maintainer edits or suggestions. This command has no preview or release writes.
+
+The planner groups whole PRs and direct commits. Investigators see their group's
+discussion and first-parent diff statistics. They can request patches, file
+line ranges, or literal searches at the release base, release head and commits
+in the group. Configured path exclusions also apply to these queries.
+The editor receives validated group findings, inventory and prior state.
+Review `notes.md`, `coverage.json`, `review.md` and per-call usage in `metrics.json`.
+
+Reuse the cache directory across runs. Group membership, model settings,
+guidelines, changes to touched files and results of recorded reads and searches
+determine investigation reuse. Exact planning and editing inputs can also reuse
+their results. On Actions, restore and save this directory on trusted runs.
+It contains model-generated findings. Tool installation has its own cache.

@@ -12,6 +12,7 @@ pub const PROMPT_VERSION: &str = "1";
 pub const DEFAULT_MAX_INPUT_BYTES: usize = 800_000;
 pub mod evaluation;
 pub mod github;
+pub mod grouped;
 pub mod openai;
 
 pub fn git(repo: &Path, args: &[&str]) -> Result<String> {
@@ -103,6 +104,37 @@ pub fn collect(
     repository: &str,
     omitted: &[String],
     context_paths: &[String],
+    github: GithubContext,
+) -> Result<Evidence> {
+    collect_range(
+        repo,
+        base,
+        target,
+        repository,
+        omitted,
+        Some(context_paths),
+        github,
+    )
+}
+
+pub fn collect_inventory(
+    repo: &Path,
+    base: &str,
+    target: &str,
+    repository: &str,
+    omitted: &[String],
+    github: GithubContext,
+) -> Result<Evidence> {
+    collect_range(repo, base, target, repository, omitted, None, github)
+}
+
+fn collect_range(
+    repo: &Path,
+    base: &str,
+    target: &str,
+    repository: &str,
+    omitted: &[String],
+    context_paths: Option<&[String]>,
     mut github: GithubContext,
 ) -> Result<Evidence> {
     ensure!(valid_repository(repository), "expected owner/repository");
@@ -164,7 +196,7 @@ pub fn collect(
             })
             .map(String::as_str)
             .collect();
-        let patch = if selected.is_empty() {
+        let patch = if context_paths.is_none() || selected.is_empty() {
             String::new()
         } else {
             let mut args = vec![
@@ -236,7 +268,7 @@ pub fn collect(
         .cloned()
         .collect();
     let selected: Vec<_> = changed_paths.iter().filter(|p| !is_omitted(p)).collect();
-    let net_diff = if selected.is_empty() {
+    let net_diff = if context_paths.is_none() || selected.is_empty() {
         String::new()
     } else {
         let mut args = vec![
@@ -254,7 +286,7 @@ pub fn collect(
         git(repo, &args)?
     };
     let mut context = BTreeMap::new();
-    for path in context_paths {
+    for path in context_paths.unwrap_or_default() {
         ensure!(
             !is_omitted(path),
             "context path {path} is explicitly omitted"
