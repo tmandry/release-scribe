@@ -482,3 +482,96 @@ fn explicit_budget_accepts_large_complete_inputs_and_reports_growth() {
         patch.len()
     );
 }
+
+#[test]
+fn grouped_run_rechecks_code_context_when_head_moves() {
+    use serde_json::{Value, json};
+    let repo = init();
+    let cache = tempfile::tempdir().unwrap();
+    let base = commit(repo.path(), "context", "previous context", "base");
+    commit(
+        repo.path(),
+        "holdout",
+        "hidden context",
+        "private release text",
+    );
+    let feature = commit(repo.path(), "feature", "visible setting", "add setting");
+    let omit = vec!["holdout".to_owned()];
+    let run = |head: &str| {
+        let mut request = request();
+        request.evidence = collect_inventory(
+            repo.path(),
+            &base,
+            head,
+            "owner/project",
+            &omit,
+            GithubContext::default(),
+        )
+        .unwrap();
+        let mut feature_calls = 0;
+        let staged = grouped::Run::new(repo.path(), &request, &omit, cache.path(), |body| {
+            let data: Value = serde_json::from_str(body["input"].as_str().unwrap())?;
+            let notes_for = |ids: Vec<String>| json!({"overview":"This release includes updates.","bullets":[],"questions":[],"coverage":ids.into_iter().map(|id|json!({"source":id,"disposition":"excluded","reason":"internal","bullets":[]})).collect::<Vec<_>>()});
+            let result = match body["text"]["format"]["name"].as_str().unwrap() {
+                "group" => {
+                    json!({"groups":data.as_object().unwrap().keys().map(|id|vec![id]).collect::<Vec<_>>() })
+                }
+                "investigate" => {
+                    let id = data["group"]["changes"][0]["unit"].as_str().unwrap();
+                    if id == feature && data["context"].as_array().unwrap().is_empty() {
+                        feature_calls += 1;
+                        json!({"finding":null,"queries":[
+                            {"kind":"read","revision":"head","value":"context","start":1},
+                            {"kind":"patch","revision":feature,"value":"feature","start":1},
+                            {"kind":"search","revision":"head","value":"context","start":1},
+                            {"kind":"read","revision":"head","value":"holdout","start":1}]})
+                    } else {
+                        if id == feature {
+                            let ctx = &data["context"];
+                            assert!(ctx[0]["result"]["lines"].to_string().contains("context"));
+                            assert!(
+                                ctx[1]["result"]["lines"]
+                                    .to_string()
+                                    .contains("+visible setting")
+                            );
+                            assert!(ctx[2]["result"]["lines"].to_string().contains("context:1:"));
+                            assert!(!ctx[2]["result"].to_string().contains("hidden"));
+                            assert!(ctx[3]["result"].get("error").is_some());
+                        }
+                        json!({"queries":[],"finding":notes_for(vec![id.into()])})
+                    }
+                }
+                "edit" => notes_for(
+                    data["inventory"]
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .cloned()
+                        .collect(),
+                ),
+                _ => panic!(),
+            };
+            Ok(
+                json!({"status":"completed","output":[{"content":[{"type":"output_text","text":result.to_string()}]}]}),
+            )
+        });
+        let mut staged = staged.unwrap();
+        staged.generate().unwrap();
+        (staged.metrics(), feature_calls)
+    };
+    let (initial, calls) = run(&feature);
+    assert_eq!(calls, 1);
+    assert_eq!(initial["calls"].as_array().unwrap().len(), 5);
+    assert!(run(&feature).0["calls"].as_array().unwrap().is_empty());
+    let unrelated = commit(repo.path(), "other", "unrelated", "other");
+    let (incremental, calls) = run(&unrelated);
+    assert_eq!(calls, 0);
+    assert_eq!(incremental["investigation_cache_hits"], 2);
+    let changed = commit(
+        repo.path(),
+        "context",
+        "changed context",
+        "update surrounding behavior",
+    );
+    assert_eq!(run(&changed).1, 1);
+}

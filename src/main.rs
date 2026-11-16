@@ -12,6 +12,28 @@ struct Cli {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum Action {
+    /// Investigate PR groups at pinned revisions. Writes only local artifacts.
+    Grouped {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        base: String,
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        github_context: Option<PathBuf>,
+        #[arg(long)]
+        prior_state: Option<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        cache: PathBuf,
+        /// Permit paid model calls. The default only writes the inventory.
+        #[arg(long)]
+        generate: bool,
+    },
     /// Generate with OpenAI, reusing a validated exact cache hit before any paid call.
     Generate {
         #[arg(long)]
@@ -100,6 +122,81 @@ enum Action {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
+        Action::Grouped {
+            repo,
+            base,
+            target,
+            config,
+            github_context,
+            prior_state,
+            output,
+            cache,
+            generate,
+        } => {
+            ensure!(!output.exists(), "output already exists");
+            let config: evaluation::Config = read_json(&config)?;
+            let initial = collect_inventory(
+                &repo,
+                &base,
+                &target,
+                &config.repository,
+                &config.omit,
+                GithubContext::default(),
+            )?;
+            let github = match github_context {
+                Some(path) => read_json(&path)?,
+                None => {
+                    let github = github::fetch_context(&initial, &github::Gh);
+                    ensure!(github.limitations.len() == 1, "incomplete GitHub context");
+                    github
+                }
+            };
+            let mut evidence = collect_inventory(
+                &repo,
+                &initial.base,
+                &initial.target,
+                &config.repository,
+                &config.omit,
+                github,
+            )?;
+            ensure!(
+                !generate
+                    || evidence
+                        .commits
+                        .iter()
+                        .flat_map(|c| &c.pull_requests)
+                        .all(|n| evidence.github.pull_requests.contains_key(n)),
+                "missing pull request evidence"
+            );
+            evidence.documentation_links = config.documentation_links;
+            let request = Request {
+                prompt_version: PROMPT_VERSION.into(),
+                instructions: default_instructions(),
+                model: config.model,
+                settings: BTreeMap::new(),
+                guidelines: fs::read_to_string(repo.join(config.guidelines))?,
+                prior_state: match prior_state {
+                    Some(path) => read_json(&path)?,
+                    None => serde_json::Value::Null,
+                },
+                evidence,
+            };
+            let mut run = grouped::Run::new(&repo, &request, &config.omit, &cache, openai::call)?;
+            fs::create_dir_all(&output)?;
+            fs::write(
+                output.join("inventory.json"),
+                serde_json::to_vec_pretty(&run.inventory())?,
+            )?;
+            let result = if generate { Some(run.generate()) } else { None };
+            fs::write(
+                output.join("metrics.json"),
+                serde_json::to_vec_pretty(&run.metrics())?,
+            )?;
+            println!("{}", run.metrics());
+            if let Some(notes) = result {
+                write_output(&output, &request, &notes?)?;
+            }
+        }
         Action::Generate {
             request,
             cache,
