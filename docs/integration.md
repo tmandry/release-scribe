@@ -76,3 +76,17 @@ Before enabling automatic events or replacing release automation, separately
 test feedback races, budget enforcement, versioning, snapshots, exact-tag
 publication, and source-PR comment updates. This manual stage does not implement
 those production steps.
+
+
+## Input budgets
+
+Evaluation defaults to an 800,000-byte input ceiling. Set `max_input_bytes` in
+the consuming repository's configuration to choose a different ceiling, for
+example `"max_input_bytes": 2000000` for a larger release range. Collection also
+supports `--max-bytes`. The default remains conservative; a byte ceiling is not
+a provider token limit, so choose it for the selected model and spending budget.
+
+Dry runs report the input bytes, configured limit, commit count, and raw section
+sizes. Oversize failures identify section sizes without logging source contents.
+The tool never truncates evidence or invokes a model when the ceiling is exceeded.
+Changing the ceiling alone does not change model inputs or invalidate cached notes.

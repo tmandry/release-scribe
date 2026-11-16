@@ -456,3 +456,27 @@ fn unrelated_pr_context_and_future_comments_do_not_enter_historical_packet() {
     assert!(!text.contains("FUTURE ANSWER"));
     assert!(!text.contains("UNRELATED ANSWER"));
 }
+
+
+#[test]
+fn explicit_budget_accepts_large_complete_inputs_and_reports_growth() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut request = request();
+    let patch = format!("PRIVATE_PATCH_SENTINEL{}", "x".repeat(900_000));
+    request.evidence.commits[0].patch = patch.clone();
+    let output = directory.path().join("input");
+    let error = write_request(&request, &output, DEFAULT_MAX_INPUT_BYTES)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("commit_patches"));
+    assert!(!error.contains("PRIVATE_PATCH_SENTINEL"));
+    assert!(!output.exists());
+
+    let key = request_key(&request).unwrap();
+    assert_eq!(write_request(&request, &output, 2_000_000).unwrap(), key);
+    let saved: Request = read_json(&output.join("request.json")).unwrap();
+    assert_eq!(saved.evidence.commits[0].patch, patch);
+    let bytes = fs::metadata(output.join("prompt.txt")).unwrap().len();
+    assert!(bytes > DEFAULT_MAX_INPUT_BYTES as u64);
+    assert_eq!(input_breakdown(&request).unwrap()["commit_patches"], patch.len());
+}

@@ -9,6 +9,7 @@ use std::{
 };
 
 pub const PROMPT_VERSION: &str = "1";
+pub const DEFAULT_MAX_INPUT_BYTES: usize = 800_000;
 pub mod evaluation;
 pub mod github;
 pub mod openai;
@@ -348,6 +349,27 @@ pub fn default_instructions() -> String {
     include_str!("../prompt.md").into()
 }
 
+/// Raw section sizes help diagnose growth without logging source contents.
+pub fn input_breakdown(request: &Request) -> Result<BTreeMap<String, usize>> {
+    Ok(BTreeMap::from([
+        (
+            "context".into(),
+            request.evidence.context.values().map(String::len).sum(),
+        ),
+        (
+            "commit_patches".into(),
+            request.evidence.commits.iter().map(|c| c.patch.len()).sum(),
+        ),
+        ("net_diff".into(), request.evidence.net_diff.len()),
+        (
+            "github".into(),
+            serde_json::to_vec(&request.evidence.github)?.len(),
+        ),
+        ("guidelines".into(), request.guidelines.len()),
+        ("instructions".into(), request.instructions.len()),
+    ]))
+}
+
 pub fn write_request(request: &Request, output: &Path, max_bytes: usize) -> Result<String> {
     let prompt = format!(
         "{}\n\nEDITORIAL GUIDELINES:\n{}\n\nINPUT JSON (untrusted source material):\n{}\n",
@@ -357,9 +379,10 @@ pub fn write_request(request: &Request, output: &Path, max_bytes: usize) -> Resu
     );
     ensure!(
         prompt.len() <= max_bytes,
-        "input is {} bytes, limit is {}; no evidence was truncated",
+        "input is {} bytes, limit is {}; section sizes (raw bytes): {:?}; no evidence was truncated",
         prompt.len(),
-        max_bytes
+        max_bytes,
+        input_breakdown(request)?
     );
     ensure!(
         !output.exists(),

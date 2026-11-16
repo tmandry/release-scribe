@@ -366,3 +366,37 @@ fn manual_body_edits_survive_generation_and_the_next_run_reuses_the_proposal() {
     )
     .unwrap();
 }
+
+
+#[test]
+fn configured_budget_is_enforced_before_paid_calls_or_remote_writes() {
+    let (repo, api, mut config) = fixture();
+    assert_eq!(config.max_input_bytes, DEFAULT_MAX_INPUT_BYTES);
+    config.max_input_bytes = 1;
+    let output = tempfile::tempdir().unwrap();
+    let result = run(
+        repo.path(),
+        &config,
+        &output.path().join("rejected"),
+        true,
+        &api,
+        |_| panic!("oversize input made a paid call"),
+    );
+    assert!(result.unwrap_err().to_string().contains("limit is 1"));
+    assert!(api.state.borrow().writes.is_empty());
+
+    config.max_input_bytes = 2_000_000;
+    let result = run(
+        repo.path(),
+        &config,
+        &output.path().join("accepted"),
+        false,
+        &api,
+        |_| panic!("dry run made a paid call"),
+    )
+    .unwrap();
+    assert_eq!(result["input"]["limit_bytes"], 2_000_000);
+    assert!(result["input"]["bytes"].as_u64().unwrap() > 1);
+    assert!(result["input"]["sections"]["commit_patches"].is_number());
+    assert!(api.state.borrow().writes.is_empty());
+}

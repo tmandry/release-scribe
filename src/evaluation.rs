@@ -15,6 +15,10 @@ pub const START: &str = "<!-- release-scribe:notes -->";
 pub const END: &str = "<!-- /release-scribe:notes -->";
 pub const GUARD: &str = include_str!("../templates/no-merge.yml");
 
+fn default_max_input_bytes() -> usize {
+    DEFAULT_MAX_INPUT_BYTES
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -28,6 +32,8 @@ pub struct Config {
     #[serde(default)]
     pub documentation_links: BTreeMap<String, String>,
     pub model: String,
+    #[serde(default = "default_max_input_bytes")]
+    pub max_input_bytes: usize,
 }
 
 pub trait Remote: Api {
@@ -331,7 +337,13 @@ pub fn run(
         prior_state: json!({"maintainer_notes":edited_notes,"maintainer_pr_notes":edited_body,"feedback":feedback}),
         evidence,
     })?;
-    let key = write_request(&request, &output.join("input"), 800_000)?;
+    let key = write_request(&request, &output.join("input"), config.max_input_bytes)?;
+    let input = json!({
+        "bytes": fs::metadata(output.join("input/prompt.txt"))?.len(),
+        "limit_bytes": config.max_input_bytes,
+        "commits": request.evidence.commits.len(),
+        "sections": input_breakdown(&request)?,
+    });
     let state_head = head(api, &root, STATE)?;
     let cache = output.join("cache");
     if let Some(state_head) = &state_head
@@ -354,7 +366,7 @@ pub fn run(
     }
     if !apply {
         return Ok(
-            json!({"apply":false,"source":source,"input_key":key,"cache_hit":load_response(&cache,&request)?.is_some()}),
+            json!({"apply":false,"source":source,"input_key":key,"input":input,"cache_hit":load_response(&cache,&request)?.is_some()}),
         );
     }
     let generated = openai::generate(&request, &cache, model)?;
@@ -470,7 +482,7 @@ pub fn run(
     };
     api.write("POST",&format!("{root}/statuses/{next}"),&json!({"state":"failure","context":"release-scribe/no-merge","description":"Evaluation only. Do not merge this PR."}))?;
     Ok(
-        json!({"url":result["html_url"],"input_key":key,"generation":generated.metadata,"human_edits_preserved":protected_notes || protected_body}),
+        json!({"url":result["html_url"],"input_key":key,"input":input,"generation":generated.metadata,"human_edits_preserved":protected_notes || protected_body}),
     )
 }
 

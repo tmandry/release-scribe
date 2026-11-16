@@ -73,7 +73,7 @@ enum Action {
         omit: Vec<String>,
         #[arg(long)]
         context: Vec<String>,
-        #[arg(long, default_value_t = 800_000)]
+        #[arg(long, default_value_t = DEFAULT_MAX_INPUT_BYTES)]
         max_bytes: usize,
     },
     /// Validate a response, save it immutably, and render notes and reviewer questions.
