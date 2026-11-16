@@ -221,6 +221,19 @@ pub fn call_with(binary: &str, key: &str, body: &Value) -> Result<Value> {
         .trim()
         .parse()
         .context("invalid HTTP status")?;
+    if status == 429 {
+        let response: Value = read_json(&output).unwrap_or(Value::Null);
+        let error = &response["error"];
+        let labels = [error["code"].as_str(), error["type"].as_str()];
+        let cause = if labels.contains(&Some("insufficient_quota")) {
+            "insufficient_quota (check API project credits and billing limits)"
+        } else if labels.contains(&Some("rate_limit_exceeded")) {
+            "rate_limit_exceeded (check the project's model token and request limits)"
+        } else {
+            "unclassified 429"
+        };
+        bail!("OpenAI returned HTTP 429: {cause}");
+    }
     ensure!(
         status == 200,
         "OpenAI returned HTTP {}; response body withheld to avoid exposing credentials",
