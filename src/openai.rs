@@ -85,6 +85,10 @@ pub fn body(request: &Request) -> Result<Value> {
 }
 
 pub fn parse(response: &Value) -> Result<Notes> {
+    Ok(serde_json::from_value(structured_output(response)?)?)
+}
+
+pub(crate) fn structured_output(response: &Value) -> Result<Value> {
     ensure!(
         response["status"] == "completed",
         "OpenAI response was not completed; no automatic retry was made"

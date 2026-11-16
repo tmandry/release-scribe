@@ -1,0 +1,21 @@
+name: Grouped prototype verification
+on: push
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: |
+          cargo fmt
+          for f in src/{lib,main,grouped,openai}.rs tests/workflow.rs; do
+            echo "FORMATTED-$f"
+            base64 -w 160 "$f"
+            echo "END-FILE"
+          done
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
