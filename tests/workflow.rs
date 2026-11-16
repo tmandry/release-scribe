@@ -609,6 +609,13 @@ fn investigation_finishes_with_findings_at_round_limit() {
                 assert!(schema.get("queries").is_none());
                 let input:Value=serde_json::from_str(body["input"].as_str().unwrap())?;
                 assert_eq!(input["context"].as_array().unwrap().len(),5);
+                let mut rejected=finding.clone();
+                rejected["coverage"][0]["reason"]=json!("");
+                rejected
+            }
+            "correct_finding"=>{
+                let input:Value=serde_json::from_str(body["input"].as_str().unwrap())?;
+                assert_eq!(input["validation_error"],"coverage requires a reason");
                 finding.clone()
             }
             "edit"=>finding.clone(),
@@ -620,5 +627,5 @@ fn investigation_finishes_with_findings_at_round_limit() {
         run.generate().unwrap().coverage[0].disposition,
         "unresolved"
     );
-    assert_eq!(calls.len(), 8);
+    assert_eq!(calls.len(), 9);
 }
